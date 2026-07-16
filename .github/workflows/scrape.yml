@@ -1,0 +1,49 @@
+name: 공지사항 자동 수집 (클라우드)
+
+on:
+  schedule:
+    # UTC 기준 3시간마다 (한국시간 기준 대략 3시간 간격). 필요하면 주기 조정하세요.
+    - cron: "0 */3 * * *"
+  workflow_dispatch: {}   # Actions 탭에서 수동 실행 버튼도 사용 가능
+  push:
+    branches: [main]
+    paths:
+      - "config/sources.json"
+      - "scraper/**"
+
+permissions:
+  contents: write
+
+jobs:
+  scrape-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: pip install -r scraper/requirements.txt
+
+      # 해외 클라우드 IP에서도 잘 열리는 소스만 수집한다(대학 입학처/올림피아드/GED 등).
+      # KAIST·교육부·과기정통부·과학고 4곳처럼 해외 IP를 막아둔 곳은
+      # scrape-self-hosted.yml(집 PC 러너)이 담당한다.
+      - name: 스크레이퍼 실행 (data/notices.json 갱신)
+        run: python scraper/main.py --group cloud
+
+      - name: 변경사항 커밋
+        run: |
+          git config user.name "science-hub-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase origin main || true
+          git add data/notices.json
+          if git diff --cached --quiet; then
+            echo "변경 없음 (새 공지 없음)"
+          else
+            git commit -m "chore: 공지사항 자동 갱신(cloud) [skip ci]"
+            git push
+          fi
