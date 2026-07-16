@@ -1,0 +1,52 @@
+name: 공지사항 자동 수집 (self-hosted / 차단 소스 전용)
+
+# ⚠️ 이 워크플로우는 self-hosted 러너를 등록하기 전까지는 "Run workflow"를
+# 누르지 마세요. 등록 안 된 상태에서 실행하면 Actions 탭에 "Queued" 상태로
+# 영원히 멈춰 있는 잡이 쌓입니다(실패하는 게 아니라 그냥 대기함).
+#
+# 설정 순서:
+#   1) 저장소 Settings → Actions → Runners → New self-hosted runner
+#   2) 안내되는 명령어를 집 PC(또는 라즈베리파이 등 상시 켜둘 장치)에서 실행해
+#      러너를 등록하고 실행(run.sh 또는 run.cmd)
+#   3) 러너가 "Idle" 상태로 뜨는 걸 확인한 뒤 아래 schedule 주석을 해제하면
+#      정기 자동 실행도 됩니다. 그 전까지는 workflow_dispatch(수동 실행)만 동작.
+#
+# 자세한 설치 가이드: https://docs.github.com/actions/hosting-your-own-runners
+
+on:
+  workflow_dispatch: {}
+  # 러너 상시 가동을 확인한 뒤 아래 주석을 해제하세요 (예: 하루 2번, PC가 켜져
+  # 있을 가능성이 높은 시간대로 잡는 걸 추천합니다).
+  # schedule:
+  #   - cron: "0 2,11 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  scrape-and-commit:
+    runs-on: self-hosted
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: 의존성 설치
+        run: pip install -r scraper/requirements.txt --break-system-packages || pip install -r scraper/requirements.txt
+
+      # 해외 IP가 막힌 KAIST·교육부·과기정통부·과학고 4곳 등, run_on이
+      # "self_hosted"로 지정된 소스만 수집한다.
+      - name: 스크레이퍼 실행 (data/notices.json 갱신)
+        run: python scraper/main.py --group self_hosted
+
+      - name: 변경사항 커밋
+        run: |
+          git config user.name "science-hub-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git pull --rebase origin main || true
+          git add data/notices.json
+          if git diff --cached --quiet; then
+            echo "변경 없음 (새 공지 없음)"
+          else
+            git commit -m "chore: 공지사항 자동 갱신(self-hosted) [skip ci]"
+            git push
+          fi
